@@ -26,14 +26,14 @@ export class QueryCache {
   private gcTime: number
   private defaultStaleTime: number
 
-  constructor(config: QueryCacheConfig) {
+  constructor(config?: QueryCacheConfig) {
     this.cache = new Map()
     this.promisesInFlight = new Map()
     this.subscribers = new Map()
     this.gcQueue = new Set()
 
-    this.gcTime = config.gcTime ?? DEFAULT_GC_TIME
-    this.defaultStaleTime = config.defaultStaleTime ?? DEFAULT_STALE_TIME
+    this.gcTime = config?.gcTime ?? DEFAULT_GC_TIME
+    this.defaultStaleTime = config?.defaultStaleTime ?? DEFAULT_STALE_TIME
   }
 
   subscribe(queryKey: string, callback: () => void) {
@@ -144,7 +144,7 @@ export class QueryCache {
     // In proposal stage: https://github.com/tc39/proposal-cancellation
   }
 
-  private getSubscriberCount({ queryKey }: { queryKey: string }) {
+  getSubscriberCount({ queryKey }: { queryKey: string }) {
     return this.subscribers.get(queryKey)?.size || 0
   }
 
