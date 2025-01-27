@@ -1,10 +1,11 @@
 type BaseQueryState = {
-  lastUpdated: number
+  lastUpdatedAt: number
 }
 
-type IdleQueryState = BaseQueryState & {
+type IdleQueryState<TData> = BaseQueryState & {
   status: 'idle'
-  data: undefined
+  // Can be undefined or previous data
+  data: TData | undefined
   error: null
 }
 
@@ -12,32 +13,29 @@ type LoadingQueryState = BaseQueryState & {
   status: 'loading'
   data: undefined
   error: null
-  isLoading: true
 }
 
 type ErrorQueryState = BaseQueryState & {
   status: 'error'
   data: undefined
   error: Error
-  isLoading: false
 }
 
 type SuccessQueryState<TData> = BaseQueryState & {
   status: 'success'
   data: TData
   error: null
-  isLoading: false
 }
 
 export type QueryState<TData> =
-  | IdleQueryState
+  | IdleQueryState<TData>
   | LoadingQueryState
   | ErrorQueryState
   | SuccessQueryState<TData>
 
 export type UseQueryOptions<TData> = {
   queryKey: ReadonlyArray<unknown>
-  queryFn: () => Promise<TData>
+  queryFn?: () => Promise<TData>
   staleTime?: number
   gcTime?: number
 }

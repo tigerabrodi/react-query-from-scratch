@@ -24,11 +24,10 @@ describe('QueryCache', () => {
     cache.set({
       queryKey: 'key',
       state: {
-        lastUpdated: Date.now() - 1000,
+        lastUpdatedAt: Date.now() - 1000,
         status: 'success',
         data: 'data',
         error: null,
-        isLoading: false,
       },
       queryFn,
     })

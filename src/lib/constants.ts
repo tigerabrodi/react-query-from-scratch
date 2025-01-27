@@ -1,5 +1,5 @@
-
 export const DEFAULT_STALE_TIME = 0
+export const FORCE_STALE_TIME = -1
 
 export const ONE_SECOND_IN_MS = 1000
 export const ONE_MINUTE_IN_MS = 60 * ONE_SECOND_IN_MS
