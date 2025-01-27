@@ -1,3 +1,4 @@
+import { hashKey } from './hash-utils'
 import { QueryCache } from './query-cache'
 
 type QueryClientConfig = {
@@ -16,7 +17,7 @@ export class QueryClient {
     queryKey: ReadonlyArray<unknown>,
     queryFn: () => Promise<TData>
   ) {
-    const hashedKey = this.hashQueryKey(queryKey)
+    const hashedKey = hashKey(queryKey)
     return this.queryCache.fetchQuery({ queryKey: hashedKey, queryFn })
   }
 
@@ -25,37 +26,38 @@ export class QueryClient {
     queryKey: ReadonlyArray<unknown>
   ): TData | undefined {
     const existingCachedEntry = this.queryCache.get<TData>({
-      queryKey: this.hashQueryKey(queryKey),
+      queryKey: hashKey(queryKey),
     })
 
     return existingCachedEntry?.state.data
   }
 
   setQueryData<TData>(queryKey: ReadonlyArray<unknown>, data: TData): void {
-    const hashedKey = this.hashQueryKey(queryKey)
+    const hashedKey = hashKey(queryKey)
     this.queryCache.setData({ queryKey: hashedKey, data })
   }
 
+  refetchQueries<TData>(queryKey: ReadonlyArray<unknown>): Promise<TData> {
+    const hashedKey = hashKey(queryKey)
+    return this.queryCache.refetchQuery({ queryKey: hashedKey })
+  }
+
   invalidateQueries(queryKey: ReadonlyArray<unknown>): void {
-    const hashedKey = this.hashQueryKey(queryKey)
+    const hashedKey = hashKey(queryKey)
     this.queryCache.markAsStale({ queryKey: hashedKey })
   }
 
   cancelQueries(queryKey: ReadonlyArray<unknown>): void {
-    const hashedKey = this.hashQueryKey(queryKey)
+    const hashedKey = hashKey(queryKey)
     this.queryCache.cancelQuery({ queryKey: hashedKey })
   }
 
   hasQuery(queryKey: ReadonlyArray<unknown>): boolean {
-    const hashedKey = this.hashQueryKey(queryKey)
+    const hashedKey = hashKey(queryKey)
     return this.queryCache.hasQuery({ queryKey: hashedKey })
   }
 
   clear(): void {
     this.queryCache.clear()
-  }
-
-  private hashQueryKey(queryKey: ReadonlyArray<unknown>): string {
-    return JSON.stringify(queryKey)
   }
 }

@@ -15,7 +15,7 @@ describe('QueryClient', () => {
   })
 
   test('fetchQuery properly coordinates with cache', async () => {
-    // Why? Critical for data fetching lifecycle
+    // Why? Important for data fetching lifecycle
     // If broken:
     // 1. Could have race conditions between concurrent fetches
     // 2. Might not update cache properly after fetch
@@ -40,17 +40,20 @@ describe('QueryClient', () => {
   })
 
   test('invalidateQueries marks data as stale', () => {
-    // Why? Essential for cache invalidation
+    // Why? For cache invalidation
     // If broken:
     // 1. Users might see stale data indefinitely
     // 2. Manual invalidation wouldn't trigger refetches
     // 3. Cache could get out of sync with server
-    const client = new QueryClient({})
+    const client = new QueryClient({
+      staleTime: 10000,
+    })
     const data = 'initial'
     client.setQueryData(['key'], data)
 
     client.invalidateQueries(['key'])
     // Next fetch should happen because data is stale
+    // Even if staleTime is 10000
     const queryFn = vi.fn()
 
     void client.fetchQuery(['key'], queryFn)
@@ -67,7 +70,7 @@ describe('QueryClient', () => {
     const queryFn = vi
       .fn()
       .mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 100))
+        () => new Promise((resolve) => setTimeout(resolve, 50))
       )
 
     void client.fetchQuery(['key'], queryFn)
@@ -77,7 +80,7 @@ describe('QueryClient', () => {
     expect(client.getQueryData(['key'])).toBeUndefined()
   })
 
-  test.skip('hashQueryKey handles complex query keys', () => {
+  test('hashQueryKey handles complex query keys', () => {
     // Why? Critical for cache key consistency
     // If broken:
     // 1. Cache misses for equivalent query keys
@@ -92,5 +95,19 @@ describe('QueryClient', () => {
     // Same logical key should hit cache
     const sameKey = ['users', { filter: { active: true }, id: 1 }]
     expect(client.getQueryData(sameKey)).toBe('data')
+  })
+
+  test('refetchQueries triggers new fetch with existing queryFn', async () => {
+    const client = new QueryClient({})
+    const queryFn = vi.fn().mockResolvedValue('new data')
+
+    // Setup initial data
+    await client.fetchQuery(['key'], queryFn)
+    queryFn.mockClear()
+
+    // Refetch should work and use same queryFn
+    await client.refetchQueries(['key'])
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    expect(client.getQueryData(['key'])).toBe('new data')
   })
 })

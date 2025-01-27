@@ -3,7 +3,7 @@ import {
   DEFAULT_STALE_TIME,
   FORCE_STALE_TIME,
 } from './constants'
-import { QueryState } from './types'
+import { QueryState } from './query-types'
 import { getDifferenceInMs, handlePromise } from './utils'
 
 type CacheEntry<T> = {
@@ -158,6 +158,16 @@ export class QueryCache {
     this.notifySubscribers(queryKey)
   }
 
+  refetchQuery<TData>({ queryKey }: { queryKey: string }): Promise<TData> {
+    const entry = this.cache.get(queryKey) as CacheEntry<TData>
+    if (!entry?.queryFn) {
+      throw new Error(`No queryFn found for queryKey: ${queryKey}`)
+    }
+
+    // Directly trigger fetch
+    return this.fetchQuery({ queryKey, queryFn: entry.queryFn })
+  }
+
   async fetchQuery<TData>({
     queryKey,
     queryFn,
@@ -234,6 +244,11 @@ export class QueryCache {
   }
 
   cancelQuery<TData>({ queryKey }: { queryKey: string }): void {
+    // TODO: in the future, see if we can cancel the actual promise
+    // Maybe somehow use Promise.race along with AbortController?
+    // There is no built in way to cancel a promise in JS e.g. Promise.cancel() 😟
+    // In proposal stage: https://github.com/tc39/proposal-cancellation
+
     const hasExistingPromise = Boolean(this.promisesInFlight.get(queryKey))
     const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
     if (hasExistingPromise && entry) {
@@ -249,11 +264,6 @@ export class QueryCache {
         queryFn: entry.queryFn,
       })
     }
-
-    // TODO: in the future, see if we can cancel the actual promise
-    // Maybe somehow use Promise.race along with AbortController?
-    // There is no built in way to cancel a promise in JS e.g. Promise.cancel() 😟
-    // In proposal stage: https://github.com/tc39/proposal-cancellation
   }
 
   markAsStale({ queryKey }: { queryKey: string }) {

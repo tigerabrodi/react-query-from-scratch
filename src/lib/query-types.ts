@@ -33,9 +33,24 @@ export type QueryState<TData> =
   | ErrorQueryState
   | SuccessQueryState<TData>
 
+// In real tanstack query: https://github.com/TanStack/query/blob/main/packages/query-core/src/types.ts#L45
+// They use a Register interface that they extend
+// This is a TypeScript trick for extensibility
+// it's a form of "type registration" that allows users to override these types globally.
+// e.g.
+// declare module '@tanstack/query-core' {
+//   interface Register {
+//     defaultError: CustomError
+//     queryKey: [string, number]
+//   }
+// }
+// We don't need this! 😅
+export type QueryKey = ReadonlyArray<unknown>
+
 export type UseQueryOptions<TData> = {
-  queryKey: ReadonlyArray<unknown>
+  queryKey: QueryKey
   queryFn?: () => Promise<TData>
+  enabled?: boolean
   staleTime?: number
   gcTime?: number
 }
