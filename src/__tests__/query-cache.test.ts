@@ -47,4 +47,23 @@ describe('QueryCache', () => {
 
     expect(queryFn).toHaveBeenCalledTimes(1)
   })
+
+  test('markAsStale triggers new fetch on next get', async () => {
+    const cache = new QueryCache()
+    const queryFn = vi.fn().mockResolvedValue('new data')
+
+    // Setup initial data
+    await cache.fetchQuery({ queryKey: 'key', queryFn })
+    queryFn.mockClear()
+
+    // Mark as stale
+    cache.markAsStale({ queryKey: 'key' })
+
+    // Just marking stale doesn't trigger fetch
+    expect(queryFn).not.toHaveBeenCalled()
+
+    // Get should trigger the background fetch
+    cache.get({ queryKey: 'key' })
+    expect(queryFn).toHaveBeenCalledTimes(1)
+  })
 })
