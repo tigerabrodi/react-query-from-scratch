@@ -78,6 +78,11 @@ export class QueryCache {
     // There is nothing!
     if (!entry) return undefined
 
+    // If the entry is already loading, return it
+    // There is no need to fire a background fetch
+    // If the entry is already loading, it means that a background fetch is already in flight
+    if (entry.state.status === 'loading') return entry
+
     const differenceInMs = getDifferenceInMs({
       startTime: entry.state.lastUpdatedAt,
       endTime: Date.now(),
@@ -85,9 +90,8 @@ export class QueryCache {
 
     const isStale = differenceInMs > this.staleTime
 
-    if (isStale && entry.queryFn) {
-      // Fire background fetch
-      void this.fetchQuery({
+    if (isStale && entry.queryFn && entry.state.status === 'success') {
+      void this.backgroundQuery({
         queryKey,
         queryFn: entry.queryFn,
       })
@@ -165,10 +169,129 @@ export class QueryCache {
     }
 
     // Directly trigger fetch
-    return this.fetchQuery({ queryKey, queryFn: entry.queryFn })
+    return this.directQuery({ queryKey, queryFn: entry.queryFn })
   }
 
+  // fetchQuery's job is to decide whether to use direct or background fetch
   async fetchQuery<TData>({
+    queryKey,
+    queryFn,
+    initialData,
+  }: {
+    queryKey: string
+    queryFn: () => Promise<TData>
+    initialData?: TData
+  }): Promise<void> {
+    const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
+
+    if (!entry) {
+      // If the entry doesn't exist, we need to initialize it
+      // This is the first time the query is being fetched
+      return this.directQuery({ queryKey, queryFn, initialData })
+    }
+
+    // If we're in the success state
+    // It means we need to fire a background fetch
+    if (entry.state.status === 'success') {
+      return this.backgroundQuery({ queryKey, queryFn })
+    }
+  }
+
+  async backgroundQuery<TData>({
+    queryKey,
+    queryFn,
+  }: {
+    queryKey: string
+    queryFn: () => Promise<TData>
+  }): Promise<void> {
+    // If there's an in-flight promise, return it
+    // No need to trigger a new request
+    const promiseInFlight = this.promisesInFlight.get(queryKey) as
+      | Promise<TData>
+      | undefined
+
+    const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
+
+    // Early return if:
+    // 1. There's an in-flight promise
+    // 2. The entry is already fetching
+    // 3. The entry is undefined (entry must exist for background fetch to work)
+    // 4. Entry is NOT in success state, fetching can only happen after success
+    // Both should be there at the same time
+    // For safety, we check both
+    if (
+      promiseInFlight ||
+      !entry ||
+      entry.state.status === 'fetching' ||
+      entry.state.status !== 'success'
+    )
+      return
+
+    const prevLastUpdatedAt = entry.state.lastUpdatedAt
+
+    // We want the UI to reflect the fetching state
+    this.setAndNotifySubscribers({
+      queryKey,
+      state: {
+        status: 'fetching',
+        // important: keep the data from the previous fetch
+        data: entry.state.data,
+        error: null,
+        lastUpdatedAt: Date.now(),
+      },
+    })
+
+    // Useful information to understand promises ⬇️
+    // When you call a promise, it will be executed immediately
+    // It goes into the web api environment and then the microtask queue when it's done
+    // Every Promise method e.g. Promise.all, is used to "observe" and wait for the promise to resolve
+    const promise = queryFn()
+    this.promisesInFlight.set(queryKey, promise)
+
+    // More information about promises ⬇️
+    // When we call "await promise"
+    // All we're saying is "wait for the promise to resolve"
+    // The promise has already been fired
+    // Calling queryFn() again would fire off a new promise (request)
+    // When you call `await queryFn()`, what actually happens is that the promise is returned from `queryFn()`
+    // ...and that is what `await` is waiting for to be resolved
+    const [data, error] = await handlePromise({
+      promise,
+      finallyCb: () => {
+        // Clean up after completion/error
+        this.promisesInFlight.delete(queryKey)
+      },
+    })
+
+    // If there's an error, we want to fallback to the previous data
+    // No need to notify subscribers since we're not changing the data
+    if (error) {
+      console.log('falling back inside of backgroundQuery')
+      this.setAndNotifySubscribers({
+        queryKey,
+        state: {
+          status: 'success',
+          error: null,
+          data: entry.state.data,
+          lastUpdatedAt: prevLastUpdatedAt,
+        },
+        queryFn,
+      })
+    } else {
+      this.setAndNotifySubscribers({
+        queryKey,
+        state: {
+          status: 'success',
+          data,
+          error: null,
+          lastUpdatedAt: Date.now(),
+        },
+        queryFn,
+      })
+    }
+  }
+
+  async directQuery<TData>({
     queryKey,
     queryFn,
     initialData,
@@ -179,15 +302,25 @@ export class QueryCache {
   }): Promise<void> {
     // If there's an in-flight promise, return it
     // No need to trigger a new request
-    const existingEntry = this.promisesInFlight.get(queryKey) as
+    const promiseInFlight = this.promisesInFlight.get(queryKey) as
       | Promise<TData>
       | undefined
 
-    if (existingEntry) return
+    const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
+
+    // Early return if:
+    // 1. There's an in-flight promise
+    // 2. The entry is already loading
+    // Both should be there at the same time
+    // For safety, we check both
+    if (promiseInFlight || entry?.state.status === 'loading') return
 
     const shouldInitializeWithInitialData =
-      !existingEntry && initialData !== undefined
+      !promiseInFlight &&
+      initialData !== undefined &&
+      entry?.state.data === undefined
     if (shouldInitializeWithInitialData) {
+      // Initializing and notifying subscribers here is fine since it's the first time
       this.setAndNotifySubscribers({
         queryKey,
         state: {
@@ -201,13 +334,14 @@ export class QueryCache {
       return
     }
 
+    // We want the UI to reflect the loading state
     this.setAndNotifySubscribers({
       queryKey,
       state: {
         status: 'loading',
         data: undefined,
         error: null,
-        lastUpdatedAt: FORCE_STALE_TIME,
+        lastUpdatedAt: Date.now(),
       },
     })
 
@@ -234,6 +368,7 @@ export class QueryCache {
     })
 
     if (error) {
+      console.log('setting the error state')
       this.setAndNotifySubscribers({
         queryKey,
         state: {

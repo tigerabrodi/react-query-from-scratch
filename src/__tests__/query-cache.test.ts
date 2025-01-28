@@ -1,6 +1,6 @@
 import { CacheEntry, QueryCache } from '../lib/query-cache'
 
-describe('QueryCache', () => {
+describe('QueryCache core functionality', () => {
   test('subscriber management correctly tracks counts', () => {
     // Why? Critical for GC timing. If we mess this up:
     // 1. Memory leaks if we don't clean up
@@ -88,5 +88,137 @@ describe('QueryCache', () => {
         error: null,
       },
     } satisfies CacheEntry<string>)
+  })
+})
+
+describe('Direct vs Background Query Flow', () => {
+  test('direct query follows idle -> loading -> success flow', async () => {
+    // Why? Fundamental to initial data loading experience
+    // If broken:
+    // 1. Users might not see loading states
+    // 2. Components might render incorrectly
+    // 3. Race conditions between states
+    const cache = new QueryCache()
+    const queryFn = vi.fn().mockResolvedValue('data')
+    const states: Array<string> = []
+
+    cache.subscribe('key', () => {
+      const state = cache.get({ queryKey: 'key' })?.state
+      if (state) {
+        states.push(state.status)
+      }
+    })
+
+    await cache.fetchQuery({ queryKey: 'key', queryFn })
+    // Order here is important
+    // We start with loading and move to success
+    // Otherwise test would fail, which is good 😁
+    expect(states).toEqual(['loading', 'success'])
+  })
+
+  test('background query follows success -> fetching -> success flow', async () => {
+    // Why? Critical for stale-while-revalidate UX
+    // If broken:
+    // 1. Users might see loading spinner instead of stale data
+    // 2. Unnecessary UI flicker during background updates
+    const cache = new QueryCache()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce('initial')
+      .mockResolvedValueOnce('updated')
+
+    await cache.fetchQuery({ queryKey: 'key', queryFn })
+    expect(cache.get({ queryKey: 'key' })?.state.data).toBe('initial')
+
+    type QueryState = {
+      status: 'success' | 'fetching' | 'loading' | 'idle' | 'error'
+      data: string | undefined
+    }
+
+    const states: Array<QueryState> = []
+
+    cache.subscribe('key', () => {
+      const entry = cache.get<string>({ queryKey: 'key' })
+      if (entry) {
+        states.push({
+          status: entry.state.status,
+          data: entry.state.data,
+        })
+      }
+    })
+
+    await cache.backgroundQuery({ queryKey: 'key', queryFn })
+    expect(states).toEqual([
+      { status: 'fetching', data: 'initial' },
+      { status: 'success', data: 'updated' },
+    ])
+  })
+
+  test('background query keeps old data during fetch', async () => {
+    // Why? Essential for showing stale data while fetching
+    // If broken:
+    // 1. UI would show loading state instead of stale data
+    // 2. Poor user experience with content flicker
+    const cache = new QueryCache()
+    const queryFn = vi
+      .fn()
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => setTimeout(() => resolve('new data'), 50))
+      )
+
+    await cache.fetchQuery({
+      queryKey: 'key',
+      queryFn: () => Promise.resolve('old data'),
+    })
+
+    void cache.backgroundQuery({ queryKey: 'key', queryFn })
+    const entry = cache.get({ queryKey: 'key' })
+
+    expect(entry?.state).toMatchObject({
+      status: 'fetching',
+      data: 'old data',
+    })
+  })
+
+  test('background query silently recovers from errors', async () => {
+    // Why? Background errors shouldn't disrupt current view
+    // If broken:
+    // 1. Users would see error states for background refreshes
+    // 2. Good data might be replaced with error states
+    const cache = new QueryCache()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce('good data')
+      .mockRejectedValueOnce(new Error('failed refresh'))
+
+    await cache.fetchQuery({ queryKey: 'key', queryFn })
+    const beforeError = cache.get({ queryKey: 'key' })?.state
+
+    await cache.backgroundQuery({ queryKey: 'key', queryFn })
+    const afterError = cache.get({ queryKey: 'key' })?.state
+
+    expect(beforeError?.data).toBe('good data')
+    expect(afterError?.data).toBe('good data')
+    expect(afterError?.status).toBe('success')
+  })
+
+  test('direct query properly handles errors', async () => {
+    // Why? Users need to know when initial loads fail
+    // If broken:
+    // 1. Failed loads might appear successful
+    // 2. Error states might not propagate to UI
+    const cache = new QueryCache()
+    const queryFn = vi.fn().mockRejectedValue(new Error('load failed'))
+
+    await cache.fetchQuery({ queryKey: 'key', queryFn })
+    const entry = cache.get({ queryKey: 'key' })
+
+    expect(entry?.state).toMatchObject({
+      status: 'error',
+      data: undefined,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      error: expect.any(Error),
+    })
   })
 })

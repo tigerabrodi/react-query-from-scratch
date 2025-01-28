@@ -9,9 +9,19 @@ type IdleQueryState<TData> = BaseQueryState & {
   error: null
 }
 
+// For first time fetches
 type LoadingQueryState = BaseQueryState & {
   status: 'loading'
   data: undefined
+  error: null
+}
+
+// For background fetches
+// This means we have the data in the cache
+// Therefore, we make sure to type this too with TData
+type FetchingQueryState<TData> = BaseQueryState & {
+  status: 'fetching'
+  data: TData
   error: null
 }
 
@@ -32,7 +42,7 @@ export type QueryState<TData> =
   | LoadingQueryState
   | ErrorQueryState
   | SuccessQueryState<TData>
-
+  | FetchingQueryState<TData>
 // In real tanstack query: https://github.com/TanStack/query/blob/main/packages/query-core/src/types.ts#L45
 // They use a Register interface that they extend
 // This is a TypeScript trick for extensibility
@@ -64,7 +74,7 @@ export type UseQueryResult<TData> =
       isLoading: false
       isError: false
       isSuccess: false
-      refetch: () => Promise<TData>
+      refetch: () => void
     }
   | {
       status: 'loading'
@@ -73,7 +83,7 @@ export type UseQueryResult<TData> =
       isLoading: true
       isError: false
       isSuccess: false
-      refetch: () => Promise<TData>
+      refetch: () => void
     }
   | {
       status: 'error'
@@ -82,7 +92,7 @@ export type UseQueryResult<TData> =
       isLoading: false
       isError: true
       isSuccess: false
-      refetch: () => Promise<TData>
+      refetch: () => void
     }
   | {
       status: 'success'
@@ -91,5 +101,14 @@ export type UseQueryResult<TData> =
       isLoading: false
       isError: false
       isSuccess: true
-      refetch: () => Promise<TData>
+      refetch: () => void
+    }
+  | {
+      status: 'fetching'
+      data: TData
+      error: null
+      isLoading: false
+      isError: false
+      isSuccess: false
+      refetch: () => void
     }
