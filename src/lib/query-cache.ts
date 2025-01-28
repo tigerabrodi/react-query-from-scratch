@@ -6,7 +6,7 @@ import {
 import { QueryState } from './query-types'
 import { getDifferenceInMs, handlePromise } from './utils'
 
-type CacheEntry<T> = {
+export type CacheEntry<T> = {
   state: QueryState<T>
   queryFn?: () => Promise<T>
 }
@@ -158,7 +158,7 @@ export class QueryCache {
     this.notifySubscribers(queryKey)
   }
 
-  refetchQuery<TData>({ queryKey }: { queryKey: string }): Promise<TData> {
+  refetchQuery<TData>({ queryKey }: { queryKey: string }): Promise<void> {
     const entry = this.cache.get(queryKey) as CacheEntry<TData>
     if (!entry?.queryFn) {
       throw new Error(`No queryFn found for queryKey: ${queryKey}`)
@@ -171,16 +171,35 @@ export class QueryCache {
   async fetchQuery<TData>({
     queryKey,
     queryFn,
+    initialData,
   }: {
     queryKey: string
     queryFn: () => Promise<TData>
-  }): Promise<TData> {
+    initialData?: TData
+  }): Promise<void> {
     // If there's an in-flight promise, return it
     // No need to trigger a new request
-    const existing = this.promisesInFlight.get(queryKey) as
+    const existingEntry = this.promisesInFlight.get(queryKey) as
       | Promise<TData>
       | undefined
-    if (existing) return existing
+
+    if (existingEntry) return
+
+    const shouldInitializeWithInitialData =
+      !existingEntry && initialData !== undefined
+    if (shouldInitializeWithInitialData) {
+      this.setAndNotifySubscribers({
+        queryKey,
+        state: {
+          status: 'success',
+          data: initialData,
+          error: null,
+          lastUpdatedAt: Date.now(),
+        },
+        queryFn,
+      })
+      return
+    }
 
     this.setAndNotifySubscribers({
       queryKey,
@@ -199,6 +218,13 @@ export class QueryCache {
     const promise = queryFn()
     this.promisesInFlight.set(queryKey, promise)
 
+    // More information about promises ⬇️
+    // When we call "await promise"
+    // All we're saying is "wait for the promise to resolve"
+    // The promise has already been fired
+    // Calling queryFn() again would fire off a new promise (request)
+    // When you call `await queryFn()`, what actually happens is that the promise is returned from `queryFn()`
+    // ...and that is what `await` is waiting for to be resolved
     const [data, error] = await handlePromise({
       promise,
       finallyCb: () => {
@@ -218,29 +244,18 @@ export class QueryCache {
         },
         queryFn,
       })
-
-      throw error
+    } else {
+      this.setAndNotifySubscribers({
+        queryKey,
+        state: {
+          status: 'success',
+          data,
+          error: null,
+          lastUpdatedAt: Date.now(),
+        },
+        queryFn,
+      })
     }
-
-    // More information about promises ⬇️
-    // When we call "await promise"
-    // All we're saying is "wait for the promise to resolve"
-    // The promise has already been fired
-    // Calling queryFn() again would fire off a new promise (request)
-    // When you call `await queryFn()`, what actually happens is that the promise is returned from `queryFn()`
-    // ...and that is what `await` is waiting for to be resolved
-    this.setAndNotifySubscribers({
-      queryKey,
-      state: {
-        status: 'success',
-        data,
-        error: null,
-        lastUpdatedAt: Date.now(),
-      },
-      queryFn,
-    })
-
-    return data
   }
 
   cancelQuery<TData>({ queryKey }: { queryKey: string }): void {
