@@ -1,4 +1,4 @@
-import { QueryCache } from '../lib/query-cache'
+import { CacheEntry, QueryCache } from '../lib/query-cache'
 
 describe('QueryCache', () => {
   test('subscriber management correctly tracks counts', () => {
@@ -65,5 +65,28 @@ describe('QueryCache', () => {
     // Get should trigger the background fetch
     cache.get({ queryKey: 'key' })
     expect(queryFn).toHaveBeenCalledTimes(1)
+  })
+
+  test('fetchQuery initializes with initialData', async () => {
+    const cache = new QueryCache()
+    const queryFn = vi.fn().mockResolvedValue('data')
+
+    await cache.fetchQuery({
+      queryKey: 'key',
+      queryFn,
+      initialData: 'initial data',
+    })
+    expect(queryFn).not.toHaveBeenCalled()
+
+    expect(cache.get({ queryKey: 'key' })).toMatchObject({
+      queryFn,
+      state: {
+        status: 'success',
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        lastUpdatedAt: expect.any(Number),
+        data: 'initial data',
+        error: null,
+      },
+    } satisfies CacheEntry<string>)
   })
 })
