@@ -7,7 +7,7 @@ describe('QueryClient', () => {
     // 1. Components could show different data for same query
     // 2. Manual updates via setQueryData wouldn't be reflected
     // 3. Type safety between set/get could be broken
-    const client = new QueryClient({})
+    const client = new QueryClient()
     const data = { id: 1, name: 'test' }
 
     client.setQueryData(['user', 1], data)
@@ -20,11 +20,11 @@ describe('QueryClient', () => {
     // 1. Could have race conditions between concurrent fetches
     // 2. Might not update cache properly after fetch
     // 3. Error states might not be handled correctly
-    const client = new QueryClient({})
+    const client = new QueryClient()
     const queryFn = vi.fn().mockResolvedValue('data')
 
     // Test sequential fetch works
-    await client.fetchQuery(['key'], queryFn)
+    await client.fetchQuery({ queryKey: ['key'], queryFn })
     expect(client.getQueryData(['key'])).toBe('data')
     expect(queryFn).toHaveBeenCalledTimes(1)
 
@@ -33,8 +33,8 @@ describe('QueryClient', () => {
 
     // Now test concurrent deduping
     await Promise.all([
-      client.fetchQuery(['key'], queryFn),
-      client.fetchQuery(['key'], queryFn),
+      client.fetchQuery({ queryKey: ['key'], queryFn }),
+      client.fetchQuery({ queryKey: ['key'], queryFn }),
     ])
     expect(queryFn).toHaveBeenCalledTimes(1)
   })
@@ -56,7 +56,7 @@ describe('QueryClient', () => {
     // Even if staleTime is 10000
     const queryFn = vi.fn()
 
-    void client.fetchQuery(['key'], queryFn)
+    void client.fetchQuery({ queryKey: ['key'], queryFn })
     expect(queryFn).toHaveBeenCalled()
   })
 
@@ -66,14 +66,14 @@ describe('QueryClient', () => {
     // 1. Memory leaks from abandoned requests
     // 2. UI could update with data from cancelled requests
     // 3. Could have inconsistent loading states
-    const client = new QueryClient({})
+    const client = new QueryClient()
     const queryFn = vi
       .fn()
       .mockImplementation(
         () => new Promise((resolve) => setTimeout(resolve, 50))
       )
 
-    void client.fetchQuery(['key'], queryFn)
+    void client.fetchQuery({ queryKey: ['key'], queryFn })
     client.cancelQueries(['key'])
 
     // Should preserve previous data and not be in loading state
@@ -86,7 +86,7 @@ describe('QueryClient', () => {
     // 1. Cache misses for equivalent query keys
     // 2. Duplicate data in cache for same logical query
     // 3. Memory leaks from proliferating cache entries
-    const client = new QueryClient({})
+    const client = new QueryClient()
     const complexKey = ['users', { id: 1, filter: { active: true } }]
 
     client.setQueryData(complexKey, 'data')
@@ -98,16 +98,64 @@ describe('QueryClient', () => {
   })
 
   test('refetchQueries triggers new fetch with existing queryFn', async () => {
-    const client = new QueryClient({})
+    const client = new QueryClient()
     const queryFn = vi.fn().mockResolvedValue('new data')
 
     // Setup initial data
-    await client.fetchQuery(['key'], queryFn)
+    await client.fetchQuery({ queryKey: ['key'], queryFn })
     queryFn.mockClear()
 
     // Refetch should work and use same queryFn
     await client.refetchQueries(['key'])
     expect(queryFn).toHaveBeenCalledTimes(1)
     expect(client.getQueryData(['key'])).toBe('new data')
+  })
+
+  test('getQueryState correctly tracks through loading, success, and error states', async () => {
+    const client = new QueryClient()
+    const successFn = vi.fn().mockResolvedValue('data')
+    const errorFn = vi.fn().mockRejectedValue(new Error('Failed to fetch'))
+
+    // Initially should be undefined
+    expect(client.getQueryState(['key'])).toBeUndefined()
+
+    // Test success path
+    const successPromise = client.fetchQuery({
+      queryKey: ['key'],
+      queryFn: successFn,
+    })
+    expect(client.getQueryState(['key'])).toMatchObject({
+      status: 'loading',
+      data: undefined,
+      error: null,
+    })
+
+    await successPromise
+    expect(client.getQueryState(['key'])).toMatchObject({
+      status: 'success',
+      data: 'data',
+      error: null,
+    })
+
+    // Test error path with different key
+    const errorPromise = client.fetchQuery({
+      queryKey: ['error-key'],
+      queryFn: errorFn,
+    })
+    expect(client.getQueryState(['error-key'])).toMatchObject({
+      status: 'loading',
+      data: undefined,
+      error: null,
+    })
+
+    await errorPromise
+    // Inside query cache, error is handled by properly updating the state
+    // We don't throw and let it propagate up to the user
+    expect(client.getQueryState(['error-key'])).toMatchObject({
+      status: 'error',
+      data: undefined,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      error: expect.any(Error),
+    })
   })
 })

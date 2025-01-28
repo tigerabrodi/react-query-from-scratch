@@ -1,5 +1,6 @@
 import { hashKey } from './hash-utils'
 import { QueryCache } from './query-cache'
+import { QueryState } from './query-types'
 
 type QueryClientConfig = {
   staleTime?: number
@@ -9,16 +10,25 @@ type QueryClientConfig = {
 export class QueryClient {
   private queryCache: QueryCache
 
-  constructor(config: QueryClientConfig) {
+  constructor(config?: QueryClientConfig) {
     this.queryCache = new QueryCache(config)
   }
 
-  async fetchQuery<TData>(
-    queryKey: ReadonlyArray<unknown>,
+  async fetchQuery<TData>({
+    queryKey,
+    queryFn,
+    initialData,
+  }: {
+    queryKey: ReadonlyArray<unknown>
     queryFn: () => Promise<TData>
-  ) {
+    initialData?: TData
+  }) {
     const hashedKey = hashKey(queryKey)
-    return this.queryCache.fetchQuery({ queryKey: hashedKey, queryFn })
+    return this.queryCache.fetchQuery({
+      queryKey: hashedKey,
+      queryFn,
+      initialData,
+    })
   }
 
   // Default to unknown in case user doesn't specify a type
@@ -37,7 +47,7 @@ export class QueryClient {
     this.queryCache.setData({ queryKey: hashedKey, data })
   }
 
-  refetchQueries<TData>(queryKey: ReadonlyArray<unknown>): Promise<TData> {
+  refetchQueries(queryKey: ReadonlyArray<unknown>): Promise<void> {
     const hashedKey = hashKey(queryKey)
     return this.queryCache.refetchQuery({ queryKey: hashedKey })
   }
@@ -52,9 +62,22 @@ export class QueryClient {
     this.queryCache.cancelQuery({ queryKey: hashedKey })
   }
 
+  getQueryState<TData>(
+    queryKey: ReadonlyArray<unknown>
+  ): QueryState<TData> | undefined {
+    const hashedKey = hashKey(queryKey)
+    const entry = this.queryCache.get<TData>({ queryKey: hashedKey })
+
+    return entry?.state
+  }
+
   hasQuery(queryKey: ReadonlyArray<unknown>): boolean {
     const hashedKey = hashKey(queryKey)
     return this.queryCache.hasQuery({ queryKey: hashedKey })
+  }
+
+  subscribe(queryKey: string, callback: () => void) {
+    return this.queryCache.subscribe(queryKey, callback)
   }
 
   clear(): void {

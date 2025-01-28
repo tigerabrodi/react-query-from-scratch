@@ -50,12 +50,22 @@ export type QueryKey = ReadonlyArray<unknown>
 export type UseQueryOptions<TData> = {
   queryKey: QueryKey
   queryFn?: () => Promise<TData>
-  enabled?: boolean
+  isEnabled?: boolean
   staleTime?: number
   gcTime?: number
+  initialData?: TData
 }
 
 export type UseQueryResult<TData> =
+  | {
+      status: 'idle'
+      data: undefined
+      error: null
+      isLoading: false
+      isError: false
+      isSuccess: false
+      refetch: () => Promise<TData>
+    }
   | {
       status: 'loading'
       data: undefined
@@ -63,6 +73,7 @@ export type UseQueryResult<TData> =
       isLoading: true
       isError: false
       isSuccess: false
+      refetch: () => Promise<TData>
     }
   | {
       status: 'error'
@@ -71,6 +82,7 @@ export type UseQueryResult<TData> =
       isLoading: false
       isError: true
       isSuccess: false
+      refetch: () => Promise<TData>
     }
   | {
       status: 'success'
@@ -79,4 +91,5 @@ export type UseQueryResult<TData> =
       isLoading: false
       isError: false
       isSuccess: true
+      refetch: () => Promise<TData>
     }
