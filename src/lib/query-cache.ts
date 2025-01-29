@@ -261,6 +261,8 @@ export class QueryCache {
     const prevLastUpdatedAt = entry.state.lastUpdatedAt
 
     // We want the UI to reflect the fetching state
+    // e.g. if user wants to show some spinner to right
+    // letting their users know that something is happening
     this.setAndNotifySubscribers({
       queryKey,
       state: {
