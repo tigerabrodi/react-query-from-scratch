@@ -1,6 +1,7 @@
 import {
   DEFAULT_GC_TIME,
   DEFAULT_STALE_TIME,
+  FIRST_FETCH_SUCCESS_BACKGROUND_FETCH_BUFFER_WINDOW_MS,
   FORCE_STALE_TIME,
 } from './constants'
 import { QueryState } from './query-types'
@@ -68,12 +69,29 @@ export class QueryCache {
     }
   }
 
-  get<TData>({
+  /**
+   * getState's job is to get the state of a query without any side effects
+   * It's primarily used in tests to check the state of a query
+   */
+  getState<TData>({
+    queryKey,
+  }: {
+    queryKey: string
+  }): QueryState<TData> | undefined {
+    const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
+    return entry?.state
+  }
+
+  /**
+   * getCacheEntry's job is to get the cache entry of a query and trigger background fetch
+   */
+  getCacheEntry<TData>({
     queryKey,
   }: {
     queryKey: string
   }): CacheEntry<TData> | undefined {
     const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
+
     // If we don't have a cache entry, return undefined
     // There is nothing!
     if (!entry) return undefined
@@ -83,14 +101,8 @@ export class QueryCache {
     // If the entry is already loading, it means that a background fetch is already in flight
     if (entry.state.status === 'loading') return entry
 
-    const differenceInMs = getDifferenceInMs({
-      startTime: entry.state.lastUpdatedAt,
-      endTime: Date.now(),
-    })
-
-    const isStale = differenceInMs > this.staleTime
-
-    if (isStale && entry.queryFn && entry.state.status === 'success') {
+    // We can NOT fetch without a queryFn
+    if (entry.queryFn) {
       void this.backgroundQuery({
         queryKey,
         queryFn: entry.queryFn,
@@ -112,8 +124,11 @@ export class QueryCache {
     return this.cache.has(queryKey)
   }
 
+  /**
+   * setData's job is to set data and notify subscribers
+   */
   setData<TData>({ queryKey, data }: { queryKey: string; data: TData }) {
-    const entry = this.get<TData>({ queryKey })
+    const entry = this.getCacheEntry<TData>({ queryKey })
 
     this.setAndNotifySubscribers({
       queryKey,
@@ -139,9 +154,11 @@ export class QueryCache {
     this.cache.set(queryKey, { state, queryFn })
   }
 
-  // Every time the UI should reflect the updated state
-  // We need to notify subscribers
-  // Calling a subscriber is what causes the component to re-render
+  /**
+   * notifySubscribers' job is to notify subscribers
+   * Calling a subscriber is what causes the component to re-render
+   * This is private to the QueryCache class
+   */
   private notifySubscribers(queryKey: string) {
     const subscribers = this.subscribers.get(queryKey)
     if (subscribers) {
@@ -149,6 +166,10 @@ export class QueryCache {
     }
   }
 
+  /**
+   * setAndNotifySubscribers' job is to set the state and notify subscribers
+   * This is private to the QueryCache class
+   */
   private setAndNotifySubscribers<TData>({
     queryKey,
     state,
@@ -162,6 +183,10 @@ export class QueryCache {
     this.notifySubscribers(queryKey)
   }
 
+  /**
+   * refetchQuery's job is to directly trigger fetch
+   * It's used when user explicitly calls refetch
+   */
   refetchQuery<TData>({ queryKey }: { queryKey: string }): Promise<void> {
     const entry = this.cache.get(queryKey) as CacheEntry<TData>
     if (!entry?.queryFn) {
@@ -172,7 +197,9 @@ export class QueryCache {
     return this.directQuery({ queryKey, queryFn: entry.queryFn })
   }
 
-  // fetchQuery's job is to decide whether to use direct or background fetch
+  /**
+   * fetchQuery's job is to decide whether to use direct or background fetch
+   */
   async fetchQuery<TData>({
     queryKey,
     queryFn,
@@ -191,12 +218,18 @@ export class QueryCache {
     }
 
     // If we're in the success state
-    // It means we need to fire a background fetch
+    // It means we want to fire a background fetch to revalidate the data
     if (entry.state.status === 'success') {
       return this.backgroundQuery({ queryKey, queryFn })
     }
   }
 
+  /**
+   * backgroundQuery's job is to fire a background fetch
+   * It's used when the query is in the success state
+   * We want to revalidate the data
+   * There is quite some logic here, so read code and comments carefully
+   */
   async backgroundQuery<TData>({
     queryKey,
     queryFn,
@@ -212,21 +245,43 @@ export class QueryCache {
 
     const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
 
-    // Early return if:
+    // When to early return?
     // 1. There's an in-flight promise
     // 2. The entry is already fetching
     // 3. The entry is undefined (entry must exist for background fetch to work)
-    // 4. Entry is NOT in success state, fetching can only happen after success
-    // Both should be there at the same time
-    // For safety, we check both
-    if (
-      promiseInFlight ||
-      !entry ||
-      entry.state.status === 'fetching' ||
-      entry.state.status !== 'success'
-    )
-      return
+    // 4. Entry is NOT in any success states, fetching can only happen after success
+    // 5. Entry is not stale based on staleTime
+    // 6. If it's the query's first fetch, we don't want to do any background fetches within the first 250ms to prevent infinite loops
 
+    if (promiseInFlight || !entry) {
+      return
+    }
+
+    const isNotInAnySuccessStates =
+      entry.state.status !== 'success' && entry.state.status !== 'first-success'
+    const isFetching = entry.state.status === 'fetching'
+    if (isNotInAnySuccessStates || isFetching) return
+
+    const differenceInMs = getDifferenceInMs({
+      startTime: entry.state.lastUpdatedAt,
+      endTime: Date.now(),
+    })
+
+    const isStale = differenceInMs > this.staleTime
+
+    // Only refetch if the data is stale
+    if (!isStale) {
+      return
+    }
+
+    const isFirstFetchSuccessForQuery = entry.state.status === 'first-success'
+    const isFirstFetchWithinBufferWindow =
+      differenceInMs < FIRST_FETCH_SUCCESS_BACKGROUND_FETCH_BUFFER_WINDOW_MS
+    if (isFirstFetchSuccessForQuery && isFirstFetchWithinBufferWindow) {
+      return
+    }
+
+    // Used for rollback if something goes wrong
     const prevLastUpdatedAt = entry.state.lastUpdatedAt
 
     // We want the UI to reflect the fetching state
@@ -266,7 +321,6 @@ export class QueryCache {
     // If there's an error, we want to fallback to the previous data
     // No need to notify subscribers since we're not changing the data
     if (error) {
-      console.log('falling back inside of backgroundQuery')
       this.setAndNotifySubscribers({
         queryKey,
         state: {
@@ -291,6 +345,10 @@ export class QueryCache {
     }
   }
 
+  /**
+   * directQuery's job is to directly trigger fetch
+   * We only hindren them if we need to do request deduplication
+   */
   async directQuery<TData>({
     queryKey,
     queryFn,
@@ -319,12 +377,13 @@ export class QueryCache {
       !promiseInFlight &&
       initialData !== undefined &&
       entry?.state.data === undefined
+
     if (shouldInitializeWithInitialData) {
       // Initializing and notifying subscribers here is fine since it's the first time
       this.setAndNotifySubscribers({
         queryKey,
         state: {
-          status: 'success',
+          status: 'first-success',
           data: initialData,
           error: null,
           lastUpdatedAt: Date.now(),
@@ -368,7 +427,6 @@ export class QueryCache {
     })
 
     if (error) {
-      console.log('setting the error state')
       this.setAndNotifySubscribers({
         queryKey,
         state: {
@@ -380,10 +438,14 @@ export class QueryCache {
         queryFn,
       })
     } else {
+      // If we don't have data
+      // It means it's the first fetch for the query
+      const isFirstFetchForQuery = !entry?.state.data
+
       this.setAndNotifySubscribers({
         queryKey,
         state: {
-          status: 'success',
+          status: isFirstFetchForQuery ? 'first-success' : 'success',
           data,
           error: null,
           lastUpdatedAt: Date.now(),
@@ -416,13 +478,15 @@ export class QueryCache {
     }
   }
 
-  markAsStale({ queryKey }: { queryKey: string }) {
-    const entry = this.cache.get(queryKey)
+  markAsStale<TData>({ queryKey }: { queryKey: string }) {
+    const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
     if (entry) {
       this.setAndNotifySubscribers({
         queryKey,
         state: {
-          ...entry.state,
+          status: 'success',
+          data: entry.state.data,
+          error: null,
           lastUpdatedAt: FORCE_STALE_TIME,
         },
         queryFn: entry.queryFn,
@@ -434,6 +498,11 @@ export class QueryCache {
     return this.subscribers.get(queryKey)?.size || 0
   }
 
+  /**
+   * scheduleGC's job is to schedule garbage collection
+   * It's used to clean up the cache
+   * This is private to the QueryCache class
+   */
   private scheduleGC({ queryKey }: { queryKey: string }) {
     const existingTimeout = this.gcTimeouts.get(queryKey)
     if (existingTimeout) clearTimeout(existingTimeout)

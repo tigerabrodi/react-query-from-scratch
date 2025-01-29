@@ -32,7 +32,7 @@ describe('QueryCache core functionality', () => {
       queryFn,
     })
 
-    cache.get({ queryKey: 'key' })
+    cache.getCacheEntry({ queryKey: 'key' })
     expect(queryFn).toHaveBeenCalled()
   })
 
@@ -63,7 +63,7 @@ describe('QueryCache core functionality', () => {
     expect(queryFn).not.toHaveBeenCalled()
 
     // Get should trigger the background fetch
-    cache.get({ queryKey: 'key' })
+    cache.getCacheEntry({ queryKey: 'key' })
     expect(queryFn).toHaveBeenCalledTimes(1)
   })
 
@@ -78,10 +78,10 @@ describe('QueryCache core functionality', () => {
     })
     expect(queryFn).not.toHaveBeenCalled()
 
-    expect(cache.get({ queryKey: 'key' })).toMatchObject({
+    expect(cache.getCacheEntry({ queryKey: 'key' })).toMatchObject({
       queryFn,
       state: {
-        status: 'success',
+        status: 'first-success',
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         lastUpdatedAt: expect.any(Number),
         data: 'initial data',
@@ -103,7 +103,7 @@ describe('Direct vs Background Query Flow', () => {
     const states: Array<string> = []
 
     cache.subscribe('key', () => {
-      const state = cache.get({ queryKey: 'key' })?.state
+      const state = cache.getState({ queryKey: 'key' })
       if (state) {
         states.push(state.status)
       }
@@ -111,44 +111,53 @@ describe('Direct vs Background Query Flow', () => {
 
     await cache.fetchQuery({ queryKey: 'key', queryFn })
     // Order here is important
-    // We start with loading and move to success
+    // We start with loading and move to first-success
     // Otherwise test would fail, which is good 😁
-    expect(states).toEqual(['loading', 'success'])
+    expect(states).toEqual(['loading', 'first-success'])
   })
 
   test('background query follows success -> fetching -> success flow', async () => {
-    // Why? Critical for stale-while-revalidate UX
-    // If broken:
-    // 1. Users might see loading spinner instead of stale data
-    // 2. Unnecessary UI flicker during background updates
+    // You can only do background fetch if the query was in the success state
+
     const cache = new QueryCache()
     const queryFn = vi
       .fn()
       .mockResolvedValueOnce('initial')
       .mockResolvedValueOnce('updated')
 
-    await cache.fetchQuery({ queryKey: 'key', queryFn })
-    expect(cache.get({ queryKey: 'key' })?.state.data).toBe('initial')
-
-    type QueryState = {
-      status: 'success' | 'fetching' | 'loading' | 'idle' | 'error'
+    const states: Array<{
+      status:
+        | 'success'
+        | 'fetching'
+        | 'loading'
+        | 'idle'
+        | 'error'
+        | 'first-success'
       data: string | undefined
-    }
+    }> = []
 
-    const states: Array<QueryState> = []
-
+    // Start tracking states from the beginning
     cache.subscribe('key', () => {
-      const entry = cache.get<string>({ queryKey: 'key' })
-      if (entry) {
+      const state = cache.getState<string>({ queryKey: 'key' })
+      if (state) {
         states.push({
-          status: entry.state.status,
-          data: entry.state.data,
+          status: state.status,
+          data: state.data,
         })
       }
     })
 
+    // Initial fetch
+    await cache.fetchQuery({ queryKey: 'key', queryFn })
+
+    // Force background fetch
+    cache.markAsStale({ queryKey: 'key' })
     await cache.backgroundQuery({ queryKey: 'key', queryFn })
+
     expect(states).toEqual([
+      { status: 'loading', data: undefined },
+      { status: 'first-success', data: 'initial' },
+      { status: 'success', data: 'initial' },
       { status: 'fetching', data: 'initial' },
       { status: 'success', data: 'updated' },
     ])
@@ -162,23 +171,45 @@ describe('Direct vs Background Query Flow', () => {
     const cache = new QueryCache()
     const queryFn = vi
       .fn()
-      .mockImplementation(
-        () =>
-          new Promise((resolve) => setTimeout(() => resolve('new data'), 50))
-      )
+      .mockResolvedValueOnce('old data')
+      .mockResolvedValueOnce('new data')
 
-    await cache.fetchQuery({
-      queryKey: 'key',
-      queryFn: () => Promise.resolve('old data'),
+    const states: Array<{
+      status:
+        | 'success'
+        | 'fetching'
+        | 'loading'
+        | 'idle'
+        | 'error'
+        | 'first-success'
+      data: string | undefined
+    }> = []
+
+    // Track all state changes
+    cache.subscribe('key', () => {
+      const state = cache.getState<string>({ queryKey: 'key' })
+      if (state) {
+        states.push({
+          status: state.status,
+          data: state.data,
+        })
+      }
     })
 
-    void cache.backgroundQuery({ queryKey: 'key', queryFn })
-    const entry = cache.get({ queryKey: 'key' })
+    // Initial fetch
+    await cache.fetchQuery({ queryKey: 'key', queryFn })
 
-    expect(entry?.state).toMatchObject({
-      status: 'fetching',
-      data: 'old data',
-    })
+    // Force background fetch
+    cache.markAsStale({ queryKey: 'key' })
+    await cache.backgroundQuery({ queryKey: 'key', queryFn })
+
+    expect(states).toEqual([
+      { status: 'loading', data: undefined },
+      { status: 'first-success', data: 'old data' },
+      { status: 'success', data: 'old data' },
+      { status: 'fetching', data: 'old data' }, // Key assertion: keep old data during fetch
+      { status: 'success', data: 'new data' },
+    ])
   })
 
   test('background query silently recovers from errors', async () => {
@@ -193,10 +224,11 @@ describe('Direct vs Background Query Flow', () => {
       .mockRejectedValueOnce(new Error('failed refresh'))
 
     await cache.fetchQuery({ queryKey: 'key', queryFn })
-    const beforeError = cache.get({ queryKey: 'key' })?.state
+    const beforeError = cache.getState({ queryKey: 'key' })
 
+    cache.markAsStale({ queryKey: 'key' })
     await cache.backgroundQuery({ queryKey: 'key', queryFn })
-    const afterError = cache.get({ queryKey: 'key' })?.state
+    const afterError = cache.getState({ queryKey: 'key' })
 
     expect(beforeError?.data).toBe('good data')
     expect(afterError?.data).toBe('good data')
@@ -212,9 +244,9 @@ describe('Direct vs Background Query Flow', () => {
     const queryFn = vi.fn().mockRejectedValue(new Error('load failed'))
 
     await cache.fetchQuery({ queryKey: 'key', queryFn })
-    const entry = cache.get({ queryKey: 'key' })
+    const state = cache.getState({ queryKey: 'key' })
 
-    expect(entry?.state).toMatchObject({
+    expect(state).toMatchObject({
       status: 'error',
       data: undefined,
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
