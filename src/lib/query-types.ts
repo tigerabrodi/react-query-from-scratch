@@ -37,12 +37,20 @@ type SuccessQueryState<TData> = BaseQueryState & {
   error: null
 }
 
+type FirstSuccessQueryState<TData> = BaseQueryState & {
+  status: 'first-success'
+  data: TData
+  error: null
+}
+
 export type QueryState<TData> =
   | IdleQueryState<TData>
   | LoadingQueryState
   | ErrorQueryState
   | SuccessQueryState<TData>
   | FetchingQueryState<TData>
+  | FirstSuccessQueryState<TData>
+
 // In real tanstack query: https://github.com/TanStack/query/blob/main/packages/query-core/src/types.ts#L45
 // They use a Register interface that they extend
 // This is a TypeScript trick for extensibility

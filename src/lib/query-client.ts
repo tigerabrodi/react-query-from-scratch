@@ -35,7 +35,7 @@ export class QueryClient {
   getQueryData<TData = unknown>(
     queryKey: ReadonlyArray<unknown>
   ): TData | undefined {
-    const existingCachedEntry = this.queryCache.get<TData>({
+    const existingCachedEntry = this.queryCache.getCacheEntry<TData>({
       queryKey: hashKey(queryKey),
     })
 
@@ -66,7 +66,7 @@ export class QueryClient {
     queryKey: ReadonlyArray<unknown>
   ): QueryState<TData> | undefined {
     const hashedKey = hashKey(queryKey)
-    const entry = this.queryCache.get<TData>({ queryKey: hashedKey })
+    const entry = this.queryCache.getCacheEntry<TData>({ queryKey: hashedKey })
 
     return entry?.state
   }

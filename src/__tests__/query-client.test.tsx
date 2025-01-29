@@ -14,24 +14,19 @@ describe('QueryClient', () => {
     expect(client.getQueryData(['user', 1])).toEqual(data)
   })
 
-  test('fetchQuery properly coordinates with cache', async () => {
-    // Why? Important for data fetching lifecycle
-    // If broken:
-    // 1. Could have race conditions between concurrent fetches
-    // 2. Might not update cache properly after fetch
-    // 3. Error states might not be handled correctly
+  test('fetchQuery updates cache with data', async () => {
     const client = new QueryClient()
     const queryFn = vi.fn().mockResolvedValue('data')
 
-    // Test sequential fetch works
     await client.fetchQuery({ queryKey: ['key'], queryFn })
     expect(client.getQueryData(['key'])).toBe('data')
     expect(queryFn).toHaveBeenCalledTimes(1)
+  })
 
-    // Reset mock for concurrent test
-    queryFn.mockClear()
+  test('fetchQuery deduplicates concurrent requests', async () => {
+    const client = new QueryClient()
+    const queryFn = vi.fn().mockResolvedValue('data')
 
-    // Now test concurrent deduping
     await Promise.all([
       client.fetchQuery({ queryKey: ['key'], queryFn }),
       client.fetchQuery({ queryKey: ['key'], queryFn }),
@@ -132,7 +127,7 @@ describe('QueryClient', () => {
 
     await successPromise
     expect(client.getQueryState(['key'])).toMatchObject({
-      status: 'success',
+      status: 'first-success',
       data: 'data',
       error: null,
     })
