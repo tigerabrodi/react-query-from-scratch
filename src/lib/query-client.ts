@@ -54,7 +54,9 @@ export class QueryClient {
 
   invalidateQueries(queryKey: ReadonlyArray<unknown>): void {
     const hashedKey = hashKey(queryKey)
-    this.queryCache.markAsStale({ queryKey: hashedKey })
+
+    // Should have the fire and forget experience
+    void this.queryCache.invalidateQuery({ queryKey: hashedKey })
   }
 
   cancelQueries(queryKey: ReadonlyArray<unknown>): void {

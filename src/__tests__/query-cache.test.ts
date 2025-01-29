@@ -15,11 +15,9 @@ describe('QueryCache core functionality', () => {
     expect(cache.getSubscriberCount({ queryKey: 'key' })).toBe(0)
   })
 
-  test('stale check triggers background fetch', () => {
-    // Why? Core to stale-while-revalidate pattern
-    // If broken: Users see stale data longer than configured
+  test('invalidateQuery turns entry into stale and triggers background fetch', async () => {
     const cache = new QueryCache()
-    const queryFn = vi.fn()
+    const queryFn = vi.fn().mockResolvedValue('data')
 
     cache.set({
       queryKey: 'key',
@@ -32,8 +30,33 @@ describe('QueryCache core functionality', () => {
       queryFn,
     })
 
-    cache.getCacheEntry({ queryKey: 'key' })
+    const invalidatePromise = cache.invalidateQuery({ queryKey: 'key' })
+
     expect(queryFn).toHaveBeenCalled()
+
+    const entryBefore = cache.getCacheEntry({ queryKey: 'key' })
+    expect(entryBefore).toMatchObject({
+      state: {
+        status: 'fetching',
+        data: 'data',
+        error: null,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        lastUpdatedAt: expect.any(Number),
+      },
+    })
+
+    await invalidatePromise
+
+    const entryAfter = cache.getCacheEntry({ queryKey: 'key' })
+    expect(entryAfter).toMatchObject({
+      state: {
+        status: 'success',
+        data: 'data',
+        error: null,
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        lastUpdatedAt: expect.any(Number),
+      },
+    })
   })
 
   test('fetchQuery deduplicates concurrent requests', async () => {
@@ -45,25 +68,6 @@ describe('QueryCache core functionality', () => {
       cache.fetchQuery({ queryKey: 'key', queryFn }),
     ])
 
-    expect(queryFn).toHaveBeenCalledTimes(1)
-  })
-
-  test('markAsStale triggers new fetch on next get', async () => {
-    const cache = new QueryCache()
-    const queryFn = vi.fn().mockResolvedValue('new data')
-
-    // Setup initial data
-    await cache.fetchQuery({ queryKey: 'key', queryFn })
-    queryFn.mockClear()
-
-    // Mark as stale
-    cache.markAsStale({ queryKey: 'key' })
-
-    // Just marking stale doesn't trigger fetch
-    expect(queryFn).not.toHaveBeenCalled()
-
-    // Get should trigger the background fetch
-    cache.getCacheEntry({ queryKey: 'key' })
     expect(queryFn).toHaveBeenCalledTimes(1)
   })
 
@@ -151,8 +155,7 @@ describe('Direct vs Background Query Flow', () => {
     await cache.fetchQuery({ queryKey: 'key', queryFn })
 
     // Force background fetch
-    cache.markAsStale({ queryKey: 'key' })
-    await cache.backgroundQuery({ queryKey: 'key', queryFn })
+    await cache.invalidateQuery({ queryKey: 'key' })
 
     expect(states).toEqual([
       { status: 'loading', data: undefined },
@@ -200,8 +203,7 @@ describe('Direct vs Background Query Flow', () => {
     await cache.fetchQuery({ queryKey: 'key', queryFn })
 
     // Force background fetch
-    cache.markAsStale({ queryKey: 'key' })
-    await cache.backgroundQuery({ queryKey: 'key', queryFn })
+    await cache.invalidateQuery({ queryKey: 'key' })
 
     expect(states).toEqual([
       { status: 'loading', data: undefined },
@@ -226,8 +228,7 @@ describe('Direct vs Background Query Flow', () => {
     await cache.fetchQuery({ queryKey: 'key', queryFn })
     const beforeError = cache.getState({ queryKey: 'key' })
 
-    cache.markAsStale({ queryKey: 'key' })
-    await cache.backgroundQuery({ queryKey: 'key', queryFn })
+    await cache.invalidateQuery({ queryKey: 'key' })
     const afterError = cache.getState({ queryKey: 'key' })
 
     expect(beforeError?.data).toBe('good data')
@@ -252,5 +253,29 @@ describe('Direct vs Background Query Flow', () => {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       error: expect.any(Error),
     })
+  })
+
+  test('setData does not trigger background queries', async () => {
+    // Why? Manual updates shouldn't cause background refetches
+    // If broken:
+    // 1. Infinite loop of background queries
+    // 2. Unnecessary network requests
+    // 3. Performance issues
+    const cache = new QueryCache()
+    const queryFn = vi.fn().mockResolvedValue('server data')
+
+    // Setup initial data
+    await cache.fetchQuery({ queryKey: 'key', queryFn })
+
+    queryFn.mockClear()
+
+    // Manually set data
+    cache.setData({ queryKey: 'key', data: 'manual update' })
+
+    // queryFn should not have been called
+    expect(queryFn).not.toHaveBeenCalled()
+
+    // Data should be updated
+    expect(cache.getState({ queryKey: 'key' })?.data).toBe('manual update')
   })
 })

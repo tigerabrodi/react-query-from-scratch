@@ -82,34 +82,12 @@ export class QueryCache {
     return entry?.state
   }
 
-  /**
-   * getCacheEntry's job is to get the cache entry of a query and trigger background fetch
-   */
   getCacheEntry<TData>({
     queryKey,
   }: {
     queryKey: string
   }): CacheEntry<TData> | undefined {
-    const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
-
-    // If we don't have a cache entry, return undefined
-    // There is nothing!
-    if (!entry) return undefined
-
-    // If the entry is already loading, return it
-    // There is no need to fire a background fetch
-    // If the entry is already loading, it means that a background fetch is already in flight
-    if (entry.state.status === 'loading') return entry
-
-    // We can NOT fetch without a queryFn
-    if (entry.queryFn) {
-      void this.backgroundQuery({
-        queryKey,
-        queryFn: entry.queryFn,
-      })
-    }
-
-    return entry
+    return this.cache.get(queryKey) as CacheEntry<TData> | undefined
   }
 
   clear() {
@@ -128,7 +106,7 @@ export class QueryCache {
    * setData's job is to set data and notify subscribers
    */
   setData<TData>({ queryKey, data }: { queryKey: string; data: TData }) {
-    const entry = this.getCacheEntry<TData>({ queryKey })
+    const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
 
     this.setAndNotifySubscribers({
       queryKey,
@@ -217,11 +195,7 @@ export class QueryCache {
       return this.directQuery({ queryKey, queryFn, initialData })
     }
 
-    // If we're in the success state
-    // It means we want to fire a background fetch to revalidate the data
-    if (entry.state.status === 'success') {
-      return this.backgroundQuery({ queryKey, queryFn })
-    }
+    return this.backgroundQuery({ queryKey, queryFn })
   }
 
   /**
@@ -230,7 +204,7 @@ export class QueryCache {
    * We want to revalidate the data
    * There is quite some logic here, so read code and comments carefully
    */
-  async backgroundQuery<TData>({
+  private async backgroundQuery<TData>({
     queryKey,
     queryFn,
   }: {
@@ -478,9 +452,14 @@ export class QueryCache {
     }
   }
 
-  markAsStale<TData>({ queryKey }: { queryKey: string }) {
+  async invalidateQuery<TData>({
+    queryKey,
+  }: {
+    queryKey: string
+  }): Promise<void> {
     const entry = this.cache.get(queryKey) as CacheEntry<TData> | undefined
     if (entry) {
+      // Mark as stale
       this.setAndNotifySubscribers({
         queryKey,
         state: {
@@ -491,6 +470,13 @@ export class QueryCache {
         },
         queryFn: entry.queryFn,
       })
+
+      if (entry.queryFn) {
+        await this.backgroundQuery({
+          queryKey,
+          queryFn: entry.queryFn,
+        })
+      }
     }
   }
 
