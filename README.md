@@ -152,7 +152,7 @@ Query features:
 - Network status refetching (need to listen to network status events)
 - Polling/refetchInterval (something you'd configure in the query options)
 - Infinite queries (for pagination/infinite scroll)
-- Auspense queries
+- Suspense queries
 
 For `useSuspenseQuery`, we'd need to throw the promise. I dug into the source code before writing this, but their [useSuspenseQuery](https://github.com/TanStack/query/blob/main/packages/react-query/src/useSuspenseQuery.ts) hook is just a wrapper around `useBaseQuery` which they use. However, suspense is enabled. If it should suspense, they throw the fetch here: [useBaseQuery.ts#L116](https://github.com/TanStack/query/blob/main/packages/react-query/src/useBaseQuery.ts#L116). Very cool.
 
