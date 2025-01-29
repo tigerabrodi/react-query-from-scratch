@@ -15,6 +15,14 @@ A scoped implementation of React Query to understand the core concepts.
 ✅ Dependent queries  
 ✅ Parallel queries
 
+## Get it up and running
+
+```bash
+git clone https://github.com/tigerabrodi/react-query-from-scratch
+pnpm install install
+pnpm test
+```
+
 ## Architecture for this implementation
 
 The architecture here is different from the real tanstack query. The real one uses query observers that sit between the component and the query cache. You can read how it works here: [Inside React Query](https://tkdodo.eu/blog/inside-react-query). Their architecture is obviously more complex. It's nice though, because it's easy to create adapters for different frameworks.
