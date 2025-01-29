@@ -49,7 +49,6 @@ function hasObjectPrototype(o: any): boolean {
  * Default query & mutation keys hash function.
  * Hashes the value into a stable hash.
  */
-// TODO: MutationKey when implementing mutations
 export function hashKey(queryKey: QueryKey): string {
   return JSON.stringify(queryKey, (_, val) =>
     isPlainObject(val)
