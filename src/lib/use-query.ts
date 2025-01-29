@@ -7,6 +7,7 @@ export function useQuery<TData>(
   options: UseQueryOptions<TData>
 ): UseQueryResult<TData> {
   const queryClient = useQueryClient()
+  const isInitialFetchRef = useRef(true)
   const { queryKey, queryFn, isEnabled = true } = options
 
   // We should not create a new object on every render when the query is disabled (isEnabled = false)
@@ -34,7 +35,7 @@ export function useQuery<TData>(
   )
 
   useEffect(() => {
-    if (isEnabled && queryFn) {
+    if (isEnabled && queryFn && isInitialFetchRef.current) {
       // queryClient.fetchQuery() is a function that fetches the data
       // Inside query cache we determine whether direct or background fetch
       void queryClient.fetchQuery({
@@ -42,6 +43,8 @@ export function useQuery<TData>(
         queryFn,
         initialData: options.initialData,
       })
+
+      isInitialFetchRef.current = false
     }
   }, [isEnabled, queryClient, queryFn, queryKey, options.initialData])
 
