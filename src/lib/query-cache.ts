@@ -192,10 +192,13 @@ export class QueryCache {
     if (!entry) {
       // If the entry doesn't exist, we need to initialize it
       // This is the first time the query is being fetched
-      return this.directQuery({ queryKey, queryFn, initialData })
+      await this.directQuery({ queryKey, queryFn, initialData })
+    } else {
+      // If the entry exists, users get it in their snapshot right away from the cache
+      // We want to fire off a background fetch to revalidate the data
+      // Inside of backgroundQuery, we do all the necessary checks to determine if we should fetch or not
+      await this.backgroundQuery({ queryKey, queryFn })
     }
-
-    return this.backgroundQuery({ queryKey, queryFn })
   }
 
   /**
@@ -223,9 +226,8 @@ export class QueryCache {
     // 1. There's an in-flight promise
     // 2. The entry is already fetching
     // 3. The entry is undefined (entry must exist for background fetch to work)
-    // 4. Entry is NOT in any success states, fetching can only happen after success
+    // 4. Entry is NOT in any success states, background fetch can only happen after success
     // 5. Entry is not stale based on staleTime
-    // 6. If it's the query's first fetch, we don't want to do any background fetches within the first 250ms to prevent infinite loops
 
     if (promiseInFlight || !entry) {
       return
