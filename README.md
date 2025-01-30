@@ -1,4 +1,4 @@
-# Tanstack Query from scratch
+# TanStack Query from scratch
 
 A scoped implementation of React Query to understand the core concepts.
 
@@ -19,13 +19,13 @@ A scoped implementation of React Query to understand the core concepts.
 
 ```bash
 git clone https://github.com/tigerabrodi/react-query-from-scratch
-pnpm install install
+pnpm install
 pnpm test
 ```
 
 ## Architecture for this implementation
 
-The architecture here is different from the real tanstack query. The real one uses query observers that sit between the component and the query cache. You can read how it works here: [Inside React Query](https://tkdodo.eu/blog/inside-react-query). Their architecture is obviously more complex. It's nice though, because it's easy to create adapters for different frameworks.
+The architecture here is different from the real TanStack query. The real one uses query observers that sit between the component and the query cache. You can read how it works here: [Inside React Query](https://tkdodo.eu/blog/inside-react-query). Their architecture is obviously more complex. It's nice though, because it's easy to create adapters for different frameworks.
 
 ### My architecture
 
@@ -138,11 +138,11 @@ graph TD
 
 # How they handle race conditions
 
-One interesting thing is how the real Tanstack Query handles race conditions. They use mutation scopes with queues, where only one mutation can be active per scope. That's how they prevent race conditions. See their [mutationCache.ts](https://github.com/TanStack/query/blob/main/packages/query-core/src/mutationCache.ts).
+One interesting thing is how the real TanStack Query handles race conditions. They use mutation scopes with queues, where only one mutation can be active per scope. That's how they prevent race conditions. See their [mutationCache.ts](https://github.com/TanStack/query/blob/main/packages/query-core/src/mutationCache.ts).
 
 # Features missing
 
-There is a lot of things that aren't implemented here that from the full Tanstack Query implementation.
+There is a lot of things that aren't implemented here that from the full TanStack Query implementation.
 
 Query features:
 
@@ -151,10 +151,10 @@ Query features:
 - Window focus refetching (need to listen to window focus events)
 - Network status refetching (need to listen to network status events)
 - Polling/refetchInterval (something you'd configure in the query options)
-- Infinite queries (for pagination/infinite scroll)o
-- suspense queries
+- Infinite queries (for pagination/infinite scroll)
+- Suspense queries
 
-For useSuspenseQuery, we'd need to throw the promise. I dug into the source code before writing this, but their [useSuspenseQuery](https://github.com/TanStack/query/blob/main/packages/react-query/src/useSuspenseQuery.ts) hook is just a wrapper around useBaseQuery which they use. However, suspense is enabled. If it should suspense, they throw the fetch here: [useBaseQuery.ts#L116](https://github.com/TanStack/query/blob/main/packages/react-query/src/useBaseQuery.ts#L116). Very cool.
+For `useSuspenseQuery`, we'd need to throw the promise. I dug into the source code before writing this, but their [useSuspenseQuery](https://github.com/TanStack/query/blob/main/packages/react-query/src/useSuspenseQuery.ts) hook is just a wrapper around `useBaseQuery` which they use. However, suspense is enabled. If it should suspense, they throw the fetch here: [useBaseQuery.ts#L116](https://github.com/TanStack/query/blob/main/packages/react-query/src/useBaseQuery.ts#L116). Very cool.
 
 Mutation features:
 
